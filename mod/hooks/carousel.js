@@ -6,7 +6,7 @@
 //
 // props: { cards: Card[], cur: number, P: palette }
 //   Card: { title, sub?, kind, glyph, color, time, status, statusColor,
-//           code?: { source, format?, language? } }
+//           mono?, facts?: string[], lines?: { t, k: 'add'|'del'|'out'|'err' }[] }
 
 const GAP = 2
 
@@ -47,7 +47,7 @@ export function layoutDeck(columns, cur, count) {
 const live = new WeakMap()
 
 export default function Carousel(props, surface) {
-  const { Box, Text, Code } = surface.elements
+  const { Box, Text } = surface.elements
   const { cards = [], cur: propCur = 0, P } = props || {}
   const st = surface.state || {}
   const columns = surface.columns || 80
@@ -105,10 +105,28 @@ export default function Carousel(props, surface) {
           Text({ color: P.faint, size: 'caption', mono: true, children: [c.time] }),
         ] }),
       ] }),
-      Text({ color: big ? P.text : P.dim, size: big ? 'title' : d === 1 ? 'body' : 'caption', weight: big ? 'bold' : 'medium', wrap: 'wrap', children: [c.title] }),
+      Text({
+        color: big ? P.text : P.dim,
+        size: c.mono ? (big ? 'heading' : 'caption') : big ? 'title' : d === 1 ? 'body' : 'caption',
+        mono: Boolean(c.mono),
+        weight: big ? 'bold' : 'medium',
+        wrap: 'wrap',
+        children: [c.title],
+      }),
     ]
     if (big && c.sub) children.push(Text({ color: P.dim, wrap: 'wrap', children: [c.sub] }))
-    if (big && c.code) children.push(Code({ ...c.code, wrap: 'truncate-end' }))
+    // Engineer: facts as chips, then the few lines worth seeing.
+    if (c.facts && c.facts.length && d < 2) {
+      children.push(Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, rowGap: 0, children: c.facts.map((f, k) =>
+        Text({ key: 'f' + k, color: P.text, backgroundColor: P.line, size: 'caption', mono: true, children: [` ${f} `] })) }))
+    }
+    if (big && c.lines) {
+      for (const [k, l] of c.lines.entries()) {
+        const color = l.k === 'add' ? P.ok : l.k === 'del' || l.k === 'err' ? P.error : P.dim
+        const mark = l.k === 'add' ? '+ ' : l.k === 'del' ? '− ' : ''
+        children.push(Text({ key: 'l' + k, color, size: 'caption', mono: true, wrap: 'truncate-end', children: [mark + l.t] }))
+      }
+    }
     children.push(Box({ flexGrow: 1 }))
     children.push(Box({ flexDirection: 'row', justifyContent: 'space-between', children: [
       Text({ color: c.statusColor, size: 'caption', wrap: 'truncate-end', children: [`● ${c.status}`] }),

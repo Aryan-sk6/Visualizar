@@ -9,6 +9,7 @@ import {
   elapsed, stepTime, parseFixes, MAX_STEPS,
 } from './hud.js'
 import { layoutDeck } from './carousel.js'
+import { engSummary, slimResult } from './eng.js'
 
 const PANE = 'visualizar'
 
@@ -69,7 +70,7 @@ async function backfill($) {
     }
     for (const u of m.toolUses || []) {
       if (have.has(u.tool_use_id) || u.text === undefined) continue // in flight: live events cover it
-      hist.push({ id: u.tool_use_id, kind: 'tool', name: String(u.tool), input: u.input || {}, status: u.isError ? 'error' : 'done', startedAt: k, endedAt: k, side: false, historic: true })
+      hist.push({ id: u.tool_use_id, kind: 'tool', name: String(u.tool), input: u.input || {}, status: u.isError ? 'error' : 'done', startedAt: k, endedAt: k, side: false, historic: true, result: { output: String(u.text || '').slice(-800), ...(u.isError ? { isError: true } : {}) } })
     }
   })
   steps = [...hist, ...steps].slice(-MAX_STEPS)
@@ -117,13 +118,18 @@ function sequence() {
   return all
 }
 
+/** A step's line at the current level; Engineer uses the technical summary. */
+function say(s) {
+  return level === 'eng' ? engSummary(s, cwd).head : textFor(s.view, level)
+}
+
 /** What the NOW strip says. */
 function nowState(seq, now) {
   const running = [...seq].reverse().find((s) => s.kind === 'tool' && s.status === 'running' && !s.side)
   if (running) {
     return {
       live: true, nowIcon: running.view.icon, nowLabel: `NOW · ${CAT_LABEL[running.view.cat] || 'TOOL'}`,
-      nowText: textFor(running.view, level) + '…', clock: clockText(now - running.startedAt), cur: seq.indexOf(running),
+      nowText: say(running) + '…', clock: clockText(now - running.startedAt), cur: seq.indexOf(running),
     }
   }
   const cur = seq.length - 1
@@ -222,7 +228,7 @@ export function register(on) {
       return ran
     } finally {
       lastActivity = await $.clock.now()
-      steps = finishStep(steps, step.id, { isError: Boolean(ran && (ran.deny || ran.isError)), now: lastActivity })
+      steps = finishStep(steps, step.id, { isError: Boolean(ran && (ran.deny || ran.isError)), now: lastActivity, result: slimResult(ran) })
       redraw($)
     }
   }).catch(($, e, next) => next(e))
@@ -346,15 +352,14 @@ export function register(on) {
     const cardData = (s, i) => {
       const color = catColor(P, s.view.cat)
       const [statusColor, status] = statusOf(s)
-      const c = { title: textFor(s.view, level), kind: kindLabel(s), glyph: GLYPH[s.view.icon] || '◆', color, time: s.time, status, statusColor }
-      if (i === curIndex) {
-        if (level === 'vibe' && s.kind === 'tool') c.sub = s.view.simple
-        if (level === 'eng' && s.kind === 'tool' && s.view.eng?.body) {
-          const body = s.view.eng.body.length > 600 ? s.view.eng.body.slice(0, 600) + '\n…' : s.view.eng.body
-          c.code = s.view.eng.lang === 'diff'
-            ? { format: 'diff', source: '@@ -1 +1 @@\n' + body.replace(/^- /gm, '-').replace(/^\+ /gm, '+') }
-            : { language: s.view.eng.lang === 'shell' ? 'bash' : 'text', source: body }
-        }
+      const c = { title: say(s), kind: kindLabel(s), glyph: GLYPH[s.view.icon] || '◆', color, time: s.time, status, statusColor }
+      if (level === 'eng') {
+        const sum = engSummary(s, cwd)
+        c.mono = true
+        c.facts = sum.facts
+        if (i === curIndex) c.lines = sum.lines.slice(0, 7)
+      } else if (i === curIndex && level === 'vibe' && s.kind === 'tool') {
+        c.sub = s.view.simple
       }
       return c
     }
@@ -373,9 +378,10 @@ export function register(on) {
               Box({ borderStyle: 'round', borderColor: c.color, paddingX: 1, children: [T(c.glyph, { color: c.color, size: big ? 'heading' : 'body' })] }),
               Box({ flexDirection: 'column', flexShrink: 1, children: [label(c.kind, c.color), label(c.time, P.faint)] }),
             ] }),
-            T(c.title, { color: big ? P.text : P.dim, size: big ? 'title' : 'body', weight: big ? 'bold' : 'medium', wrap: 'wrap' }),
+            T(c.title, { color: big ? P.text : P.dim, size: c.mono ? (big ? 'heading' : 'caption') : big ? 'title' : 'body', mono: Boolean(c.mono), weight: big ? 'bold' : 'medium', wrap: 'wrap' }),
             ...(big && c.sub ? [T(c.sub, { color: P.dim, wrap: 'wrap' })] : []),
-            ...(big && c.code ? [Code({ ...c.code, wrap: 'truncate-end' })] : []),
+            ...(c.facts && c.facts.length ? [Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, children: c.facts.map((f, k) => T(` ${f} `, { key: 'f' + k, color: P.text, backgroundColor: P.line, size: 'caption', mono: true })) })] : []),
+            ...(big && c.lines ? c.lines.map((l, k) => T(l.t, { key: 'l' + k, color: l.k === 'add' ? P.ok : l.k === 'del' || l.k === 'err' ? P.error : P.dim, size: 'caption', mono: true, wrap: 'truncate-end' })) : []),
             Box({ flexGrow: 1 }),
             Box({ flexDirection: 'row', justifyContent: 'space-between', children: [
               T(`● ${c.status}`, { color: c.statusColor, size: 'caption', wrap: 'truncate-end' }),
@@ -412,7 +418,7 @@ export function register(on) {
           children: [
             T(GLYPH[s.view.icon] || '◆', { color }),
             Box({ flexDirection: 'column', flexGrow: 1, flexShrink: 1, children: [
-              T(textFor(s.view, level), { color: isCur ? P.text : P.dim, weight: isCur ? 'semibold' : 'regular', wrap: 'truncate-end' }),
+              T(say(s), { color: isCur ? P.text : P.dim, weight: isCur ? 'semibold' : 'regular', wrap: 'truncate-end' }),
               T(`● ${sl}`, { color: sc, size: 'caption' }),
             ] }),
           ],
@@ -433,7 +439,7 @@ export function register(on) {
         return Box({ key: 'tl-' + s.id, flexDirection: 'row', columnGap: 1, children: [
           label(stepTime(s, t0), P.faint),
           T(' '.repeat(start) + mark + ' '.repeat(Math.max(0, barRoom - start - len)), { color, mono: true }),
-          T(textFor(s.view, level), { color: s === seq[curIndex] ? P.text : P.dim, wrap: 'truncate-end' }),
+          T(say(s), { color: s === seq[curIndex] ? P.text : P.dim, wrap: 'truncate-end' }),
         ] })
       }) })
     } else if (e.surface === 'terminal' || e.surface === 'desktop') {
