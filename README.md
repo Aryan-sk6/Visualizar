@@ -122,7 +122,7 @@ Install it from this repository instead of a local folder (terminal):
 /plugin install visualizar --marketplace sk82santhosh-cpu/Visualizar
 ```
 
-From a shell: `claude plugin install visualizar --marketplace sk82santhosh-cpu/Visualizar`. In the Desktop app, click + next to the prompt box, then Plugins, Add marketplace with `sk82santhosh-cpu/Visualizar`, then Add plugin. In VS Code, the terminal command works from Claude Code's prompt.
+From a shell: `claude plugin install visualizar --marketplace aryan-sk6/Visualizar`. In the Desktop app, click + next to the prompt box, then Plugins, Add marketplace with `aryan-sk6/Visualizar`, then Add plugin. In VS Code, the terminal command works from Claude Code's prompt.
 
 Check it with `claude plugin validate ./mod` and `claude plugin test ./mod`. Claude Code asks you to trust the folder before it loads a mod's hooks.
 
