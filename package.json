@@ -1,0 +1,32 @@
+{
+  "name": "visualizar",
+  "version": "0.1.0",
+  "description": "Watch what your coding agent is doing, live, in plain English, a vibe summary, or raw tool calls. Reads Claude Code's own transcripts; no wrapper needed.",
+  "type": "module",
+  "bin": {
+    "visualizar": "bin/visualizar.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "public"
+  ],
+  "scripts": {
+    "test": "node --test test/",
+    "start": "node bin/visualizar.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "claude-code",
+    "agent",
+    "visualizer",
+    "transcript",
+    "timeline"
+  ],
+  "license": "MIT",
+  "optionalDependencies": {
+    "@anthropic-ai/sdk": "^0.135.0"
+  }
+}

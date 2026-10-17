@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en" data-theme="claude">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="token" content="__TOKEN__">
+  <meta name="pinned" content="__SESSION__">
+  <title>visualizar</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="brand"><span class="brand-mark"></span>VISUALIZAR</div>
+    <label class="field session-field">
+      <span class="micro">SESSION</span>
+      <select id="session"></select>
+    </label>
+    <div class="seg" id="view-seg" role="tablist" aria-label="View">
+      <button data-view="cards">Cards</button><button data-view="flow">Flow</button><button data-view="timeline">Timeline</button>
+    </div>
+    <div class="seg" id="level-seg" role="tablist" aria-label="Detail">
+      <button data-level="simple">Simple</button><button data-level="vibe">Vibe</button><button data-level="engineer">Engineer</button>
+    </div>
+    <div class="seg small" id="theme-seg" aria-label="Theme">
+      <button data-theme="claude">Claude</button><button data-theme="codex">Codex</button>
+    </div>
+    <button class="ghost" id="mistakes-btn"><span id="mistakes-ico"></span>Mistakes <b id="mistakes-count">0</b></button>
+  </header>
+
+  <section class="now hud" id="now">
+    <div class="now-ico" id="now-ico"></div>
+    <div class="now-main">
+      <div class="micro" id="now-label">NOW</div>
+      <div class="now-text" id="now-text">Connecting…</div>
+    </div>
+    <div class="now-side">
+      <div class="clock" id="now-clock">T+00:00</div>
+      <div class="micro" id="now-meta"></div>
+    </div>
+    <div class="scan"></div>
+  </section>
+
+  <main id="stage"></main>
+
+  <button class="jump hidden" id="jump">Jump to now</button>
+
+  <aside class="drawer hidden" id="detail" aria-label="Step detail"></aside>
+  <aside class="panel hidden" id="mistakes" aria-label="Mistakes"></aside>
+  <div class="tip hidden" id="tip"></div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
