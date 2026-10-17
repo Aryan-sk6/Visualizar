@@ -6,7 +6,7 @@ export const LEVELS = ['simple', 'vibe', 'eng'];
 export const LEVEL_NAMES = { simple: 'Simple', vibe: 'Vibe', eng: 'Engineer' };
 export const LAYOUTS = ['cards', 'flow', 'timeline'];
 export const LAYOUT_NAMES = { cards: 'Cards', flow: 'Flow', timeline: 'Timeline' };
-export const MAX_STEPS = 40;
+export const MAX_STEPS = 150;
 export const THEMES = ['claude', 'codex'];
 export const THEME_NAMES = { claude: 'Claude', codex: 'Codex' };
 

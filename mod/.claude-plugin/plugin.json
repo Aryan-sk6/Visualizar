@@ -1,6 +1,6 @@
 {
   "name": "visualizar",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A sci-fi HUD pane showing what Claude is doing right now, in plain English, with your steering fixes flagged in red",
   "author": { "name": "visualizar" }
 }

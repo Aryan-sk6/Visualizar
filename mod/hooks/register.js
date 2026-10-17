@@ -6,7 +6,7 @@
 // native in the Desktop app, VS Code and the terminal alike.
 import {
   LAYOUT_NAMES, LEVEL_NAMES, THEME_NAMES, PALETTES, catColor, startStep, pushStep, finishStep, viewOf, textFor,
-  elapsed, stepTime, parseFixes,
+  elapsed, stepTime, parseFixes, MAX_STEPS,
 } from './hud.js'
 
 const PANE = 'visualizar'
@@ -26,6 +26,8 @@ let isOpen = false
 let tick = 0
 // Which step the cards view centres on: null follows the live step.
 let pinned = null
+// Whether the session's earlier steps have been loaded into the pane.
+let backfilled = false
 
 const CAT_LABEL = {
   you: 'YOU', say: 'CLAUDE', read: 'READ', write: 'WRITE', run: 'RUN', test: 'TEST', search: 'SEARCH',
@@ -40,6 +42,35 @@ const GLYPH = {
 
 function redraw($) {
   $.ui.invalidate('ui.render')
+}
+
+// Loads the steps from before the pane opened (or before a reload) from the
+// conversation. They have no timestamps, so they sort before every live step
+// and show as "earlier".
+async function backfill($) {
+  backfilled = true // once per load, even if reading fails
+  let msgs = []
+  try {
+    msgs = await $.session.messages()
+  } catch {
+    return
+  }
+  const have = new Set(steps.map((s) => s.id))
+  const hist = []
+  msgs.forEach((m, k) => {
+    if (m.role === 'user') {
+      const text = String(m.text || '').trim()
+      if (text && !text.startsWith('<') && !(m.toolResults && m.toolResults.length)) {
+        hist.push({ id: 'h' + k, kind: 'prompt', text: text.slice(0, 500), status: 'done', startedAt: k, endedAt: k, historic: true })
+      }
+      return
+    }
+    for (const u of m.toolUses || []) {
+      if (have.has(u.tool_use_id) || u.text === undefined) continue // in flight: live events cover it
+      hist.push({ id: u.tool_use_id, kind: 'tool', name: String(u.tool), input: u.input || {}, status: u.isError ? 'error' : 'done', startedAt: k, endedAt: k, side: false, historic: true })
+    }
+  })
+  steps = [...hist, ...steps].slice(-MAX_STEPS)
 }
 
 async function loadFixes($) {
@@ -64,7 +95,9 @@ const hhmmss = (ms) => {
 
 /** Steps plus this session's fixes, in time order, each with its view. */
 function sequence() {
-  const first = steps[0]?.startedAt ?? Infinity
+  // Fixes have real times; the backfilled steps don't, so fixes are placed
+  // only among the live steps.
+  const first = steps.find((s) => !s.historic)?.startedAt ?? Infinity
   const mine = fixes
     .filter((f) => f.at !== null && (f.sessionId ? f.sessionId === sessionId : f.at >= first))
     .map((f, i) => ({
@@ -78,7 +111,7 @@ function sequence() {
     }))
   const all = [...steps.map((s) => ({ ...s, view: viewOf(s, cwd) })), ...mine]
   all.sort((a, b) => a.startedAt - b.startedAt)
-  for (const s of all) s.time = hhmmss(s.startedAt)
+  for (const s of all) s.time = s.historic ? 'earlier' : hhmmss(s.startedAt)
   return all
 }
 
@@ -137,6 +170,7 @@ export function register(on) {
       return { text: 'visualizar closed.' }
     }
     await loadFixes($)
+    if (!backfilled) await backfill($)
     const opened = await $.ui.open({ id: PANE, title: 'visualizar', focus: true })
     isOpen = opened.isPlaced
     return { text: opened.isPlaced ? 'visualizar open. 1/2/3 layout · s/v/e detail · c/x theme · b/n step · l live.' : 'visualizar is waiting for a wider window.' }
@@ -193,6 +227,9 @@ export function register(on) {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button, Code } = $.ui.resolve(e)
+    // Being drawn means the pane is open, including after a reload.
+    isOpen = true
+    if (!backfilled) await backfill($)
     const now = await $.clock.now()
     const P = PALETTES[theme]
     const cols = Math.max(24, e.props?.bodyColumns ?? 60)
@@ -270,6 +307,7 @@ export function register(on) {
     const statusOf = (s) => {
       if (s.kind === 'fix') return [P.cats.fix, s.deliveredAt ? 'delivered' : 'logged']
       if (s.kind !== 'tool') return [P.dim, s.time]
+      if (s.historic) return s.status === 'error' ? [P.error, 'snag'] : [P.ok, 'done']
       const d = elapsed((s.endedAt ?? now) - s.startedAt)
       if (s.status === 'running') return [P.accent, `working · ${d}`]
       if (s.status === 'error') return [P.error, `snag · ${d}`]
@@ -389,12 +427,21 @@ export function register(on) {
       Button({ key: 'live', label: follow ? 'Following live' : 'Back to live', hotkey: 'l', plain: true, dimColor: follow, onPress: () => { pinned = null; redraw($) } }),
     ] })
 
+    // Fill the pane's height, with the main view taking the room in between.
+    const rows = e.props?.scroll?.bodyRows
+    const body = Box({
+      flexDirection: 'column',
+      flexGrow: 1,
+      justifyContent: layout === 'cards' || !seq.length ? 'center' : 'flex-start',
+      children: [main],
+    })
     return Box({
       flexDirection: 'column',
       rowGap: 1,
       padding: 1,
       backgroundColor: P.bg,
-      children: [top, nowPanel, main, ...(seq.length ? [track, nav] : [])],
+      ...(rows ? { minHeight: rows } : {}),
+      children: [top, nowPanel, body, ...(seq.length ? [track, nav] : [])],
     })
   })
 }
