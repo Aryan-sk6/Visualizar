@@ -1,41 +1,53 @@
 import { test, expect } from 'claude-code/testing'
-import { sceneSvg, wrap } from './scene.js'
 
-const pane = (surface: any) => ({
+const pane = (surface: any, bodyColumns = 120) => ({
   plugin: 'visualizar',
   surface,
   component: 'Pane' as const,
   requestId: 'visualizar',
-  props: { title: 'visualizar', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 40, offset: 0 }, view: {} } as any,
-  viewport: { columns: 160, rows: 48, isFullscreen: true },
+  props: { title: 'visualizar', isFocused: true, bodyColumns, placement: 'dock', scroll: { bodyRows: 40, offset: 0 }, view: {} } as any,
+  viewport: { columns: 200, rows: 50, isFullscreen: true },
 })
 
-test('the pane draws the SVG HUD on Desktop and boxes in the terminal', async ($, on) => {
+async function setup($: any, on: any) {
   let t = 1_760_000_000_000
   on('clock.now', () => ({ value: (t += 1500) }))
-  on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('tool.call', () => ({ result: 'ok' }))
+  await $.tool.call({ tool: 'Read', file_path: '/p/README.md' } as any)
   await $.tool.call({ tool: 'Edit', file_path: '/p/src/components/TopCard.tsx', old_string: 'a', new_string: 'b' } as any)
   await $.tool.call({ tool: 'Bash', command: 'npm test', description: 'Run the tests' } as any)
+}
 
-  const desktop = await $.ui.mount(pane('desktop'))
-  const svg = await desktop.find({ type: 'Svg' })
-  expect(svg).toBeDefined()
-  const source = String((svg as any).props.source)
-  expect(source.startsWith('<svg')).toBe(true)
-  expect(source).toContain('Running the tests')
-  expect(source.length).toBeLessThan(131072)
-  expect(await desktop.find({ type: 'Button', text: 'Engineer' })).toBeDefined()
-
-  const terminal = await $.ui.mount(pane('terminal'))
-  expect(await terminal.find({ type: 'Text', text: 'Running the tests' })).toBeDefined()
-  expect(await terminal.find({ type: 'Raster', key: 'track' })).toBeDefined()
+test('the pane is built from native elements on Desktop, VS Code and the terminal', async ($, on) => {
+  await setup($, on)
+  for (const surface of ['desktop', 'vscode', 'terminal']) {
+    const ui = await $.ui.mount(pane(surface))
+    expect(await ui.find({ type: 'Svg' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: 'Running the tests' })).toBeDefined()
+    expect(await ui.find({ type: 'Button', text: 'Engineer' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '3 / 3' })).toBeDefined()
+  }
 })
 
-test('the scene escapes text and wraps long titles', () => {
-  const step = { id: 'x', kind: 'tool', status: 'running', startedAt: 0, time: '10:00:00', view: { icon: 'edit', cat: 'write', simple: 'Editing <script>"a" & b', vibe: 'v', eng: { title: 'e' } } }
-  const svg = sceneSvg({ seq: [step], cur: 0, live: true, nowIcon: 'edit', nowLabel: 'NOW', nowText: 'x', clock: 'T+00:01', meta: '', index: 1, total: 1 }, { width: 600, now: 5000 })
-  expect(svg).toContain('&lt;script&gt;&quot;a&quot; &amp; b')
-  expect(svg).not.toContain('<script>')
-  expect(wrap('one two three four five six', 9, 2)).toEqual(['one two', 'three…'])
+test('◀ steps back through the session and Back to live returns', async ($, on) => {
+  await setup($, on)
+  const ui = await $.ui.mount(pane('desktop'))
+  await ui.press({ key: 'prev' })
+  expect(await ui.find({ type: 'Text', text: '2 / 3' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', text: 'Back to live' })).toBeDefined()
+  await ui.press({ key: 'live' })
+  expect(await ui.find({ type: 'Text', text: '3 / 3' })).toBeDefined()
+})
+
+test('a narrow pane stacks the earlier steps above the current card', async ($, on) => {
+  await setup($, on)
+  const ui = await $.ui.mount(pane('terminal', 50))
+  expect(await ui.find({ type: 'Text', text: '✓ Building the top card' })).toBeDefined()
+})
+
+test('Engineer level shows the real command', async ($, on) => {
+  await setup($, on)
+  const ui = await $.ui.mount(pane('desktop'))
+  await ui.press({ key: 'lv-eng' })
+  expect(await ui.find({ type: 'Code', text: 'npm test' })).toBeDefined()
 })
