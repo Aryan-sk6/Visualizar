@@ -8,6 +8,7 @@ import {
   LAYOUT_NAMES, LEVEL_NAMES, THEME_NAMES, PALETTES, catColor, startStep, pushStep, finishStep, viewOf, textFor,
   elapsed, stepTime, parseFixes, MAX_STEPS,
 } from './hud.js'
+import { layoutDeck } from './carousel.js'
 
 const PANE = 'visualizar'
 
@@ -28,6 +29,7 @@ let tick = 0
 let pinned = null
 // Whether the session's earlier steps have been loaded into the pane.
 let backfilled = false
+let lastWheel = 0
 
 const CAT_LABEL = {
   you: 'YOU', say: 'CLAUDE', read: 'READ', write: 'WRITE', run: 'RUN', test: 'TEST', search: 'SEARCH',
@@ -225,15 +227,39 @@ export function register(on) {
     }
   }).catch(($, e, next) => next(e))
 
+  // The carousel centres the card you dragged to or clicked.
+  on('ui.message', async ($, e, next) => {
+    if (e.requestId !== PANE || e.element !== 'carousel' || typeof e.data?.select !== 'number') return next(e)
+    const n = sequence().length
+    pinned = e.data.select >= n - 1 ? null : Math.max(0, e.data.select)
+    redraw($)
+    return {}
+  }).catch(($, e, next) => next(e))
+
+  // In the Cards view, the wheel or trackpad steps through cards instead of
+  // scrolling the pane. One step per 120 ms, so a trackpad flick doesn't race.
+  on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    if (layout !== 'cards' || e.by === 0) return next(e)
+    const now = await $.clock.now()
+    if (now - lastWheel < 120) return { deny: 'visualizar: stepping through cards' }
+    lastWheel = now
+    const n = sequence().length
+    if (!n) return next(e)
+    const at = pinned ?? n - 1
+    const to = Math.max(0, Math.min(n - 1, at + Math.sign(e.by)))
+    pinned = to >= n - 1 ? null : to
+    redraw($)
+    return { deny: 'visualizar: stepping through cards' }
+  }).catch(($, e, next) => next(e))
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button, Code } = $.ui.resolve(e)
+    const { Box, Text, Button, Code, Client } = $.ui.resolve(e)
     // Being drawn means the pane is open, including after a reload.
     isOpen = true
     if (!backfilled) await backfill($)
     const now = await $.clock.now()
     const P = PALETTES[theme]
     const cols = Math.max(24, e.props?.bodyColumns ?? 60)
-    const wide = cols >= 90
     const seq = sequence()
     const st = nowState(seq, now)
     const curIndex = pinned !== null && seq[pinned] ? pinned : st.cur
@@ -315,40 +341,49 @@ export function register(on) {
     }
     const kindLabel = (s) => (CAT_LABEL[s.view.cat] || 'STEP') + (s.side ? ' · HELPER' : '')
 
-    // A step card. big = the centre one.
-    const card = (s, big) => {
+    // One step as plain card data: what the carousel (a Client, which only
+    // takes plain data) and the static deck both draw.
+    const cardData = (s, i) => {
       const color = catColor(P, s.view.cat)
-      const [sc, sl] = statusOf(s)
-      const children = [
-        Box({ flexDirection: 'row', columnGap: 2, alignItems: 'center', children: [
-          Box({ borderStyle: 'round', borderColor: color, paddingX: 1, children: [T(GLYPH[s.view.icon] || '◆', { color, size: big ? 'heading' : 'body' })] }),
-          Box({ flexDirection: 'column', children: [label(kindLabel(s), color), label(s.time, P.faint)] }),
-        ] }),
-        T(textFor(s.view, level), { color: big ? P.text : P.dim, size: big ? 'title' : 'body', weight: big ? 'bold' : 'medium', wrap: big ? 'wrap' : 'truncate-end' }),
-      ]
-      if (big && level === 'vibe' && s.kind === 'tool') children.push(T(s.view.simple, { color: P.dim }))
-      if (big && level === 'eng' && s.kind === 'tool' && s.view.eng?.body) {
-        const body = s.view.eng.body.length > 900 ? s.view.eng.body.slice(0, 900) + '\n…' : s.view.eng.body
-        children.push(s.view.eng.lang === 'diff'
-          ? Code({ format: 'diff', source: '@@ -1 +1 @@\n' + body.replace(/^- /gm, '-').replace(/^\+ /gm, '+') })
-          : Code({ language: s.view.eng.lang === 'shell' ? 'bash' : 'text', source: body }))
+      const [statusColor, status] = statusOf(s)
+      const c = { title: textFor(s.view, level), kind: kindLabel(s), glyph: GLYPH[s.view.icon] || '◆', color, time: s.time, status, statusColor }
+      if (i === curIndex) {
+        if (level === 'vibe' && s.kind === 'tool') c.sub = s.view.simple
+        if (level === 'eng' && s.kind === 'tool' && s.view.eng?.body) {
+          const body = s.view.eng.body.length > 600 ? s.view.eng.body.slice(0, 600) + '\n…' : s.view.eng.body
+          c.code = s.view.eng.lang === 'diff'
+            ? { format: 'diff', source: '@@ -1 +1 @@\n' + body.replace(/^- /gm, '-').replace(/^\+ /gm, '+') }
+            : { language: s.view.eng.lang === 'shell' ? 'bash' : 'text', source: body }
+        }
       }
-      children.push(Box({ flexDirection: 'row', justifyContent: 'space-between', children: [
-        T(`● ${sl}`, { color: sc, size: 'caption' }),
-        ...(big ? [label(`${curIndex + 1} / ${seq.length}`, P.faint)] : []),
-      ] }))
-      return Box({
-        key: (big ? 'big-' : 'card-') + s.id,
-        flexDirection: 'column',
-        rowGap: big ? 1 : 0,
-        paddingX: big ? 2 : 1,
-        paddingY: big ? 1 : 0,
-        borderStyle: big ? 'bold' : 'round',
-        borderColor: big ? color : P.line2,
-        backgroundColor: big ? P.panel2 : P.panel,
-        ...(big ? { flexGrow: 1, flexShrink: 1 } : wide ? { width: '24%' } : {}),
-        children,
-      })
+      return c
+    }
+
+    // The same deck without dragging, for surfaces with no Client (VS Code).
+    const staticDeck = () => {
+      const { slots, sz } = layoutDeck(cols, curIndex, seq.length)
+      return Box({ flexDirection: 'row', columnGap: 2, justifyContent: 'center', alignItems: 'center', children: slots.map(({ i, d }) => {
+        const c = cardData(seq[i], i)
+        const big = d === 0
+        return Box({
+          key: 'sd-' + i, flexDirection: 'column', rowGap: big ? 1 : 0, width: sz[d][0], height: sz[d][1], flexShrink: 0, overflow: 'hidden',
+          paddingX: big ? 2 : 1, paddingY: big ? 1 : 0, borderStyle: big ? 'bold' : 'round', borderColor: big ? c.color : P.line2, backgroundColor: big ? P.panel2 : P.panel,
+          children: [
+            Box({ flexDirection: 'row', columnGap: 1, alignItems: 'center', children: [
+              Box({ borderStyle: 'round', borderColor: c.color, paddingX: 1, children: [T(c.glyph, { color: c.color, size: big ? 'heading' : 'body' })] }),
+              Box({ flexDirection: 'column', flexShrink: 1, children: [label(c.kind, c.color), label(c.time, P.faint)] }),
+            ] }),
+            T(c.title, { color: big ? P.text : P.dim, size: big ? 'title' : 'body', weight: big ? 'bold' : 'medium', wrap: 'wrap' }),
+            ...(big && c.sub ? [T(c.sub, { color: P.dim, wrap: 'wrap' })] : []),
+            ...(big && c.code ? [Code({ ...c.code, wrap: 'truncate-end' })] : []),
+            Box({ flexGrow: 1 }),
+            Box({ flexDirection: 'row', justifyContent: 'space-between', children: [
+              T(`● ${c.status}`, { color: c.statusColor, size: 'caption', wrap: 'truncate-end' }),
+              ...(big ? [label(`${i + 1} / ${seq.length}`, P.faint)] : []),
+            ] }),
+          ],
+        })
+      }) })
     }
 
     // ---- the main view
@@ -356,7 +391,8 @@ export function register(on) {
     if (!seq.length) {
       main = Box({ paddingY: 2, justifyContent: 'center', children: [T('No steps yet. They appear here as Claude works.', { color: P.dim })] })
     } else if (layout === 'flow') {
-      const recent = seq.slice(Math.max(0, curIndex - 6), curIndex + 1)
+      // The pane scrolls, so show a long stretch of the session.
+      const recent = seq.slice(Math.max(0, curIndex - 40), curIndex + 1)
       const nodes = []
       recent.forEach((s, i) => {
         const isCur = i === recent.length - 1
@@ -389,7 +425,7 @@ export function register(on) {
       const t0 = turn[0].startedAt
       const span = Math.max(10_000, now - t0)
       const barRoom = Math.max(8, Math.min(40, cols - 40))
-      main = Box({ flexDirection: 'column', rowGap: 0, children: turn.slice(-14).map((s) => {
+      main = Box({ flexDirection: 'column', rowGap: 0, children: turn.slice(-60).map((s) => {
         const color = s.kind === 'fix' ? P.cats.fix : catColor(P, s.view.cat)
         const start = Math.round(((s.startedAt - t0) / span) * barRoom)
         const len = s.kind === 'tool' ? Math.max(1, Math.round((((s.endedAt ?? now) - s.startedAt) / span) * barRoom)) : 1
@@ -400,16 +436,16 @@ export function register(on) {
           T(textFor(s.view, level), { color: s === seq[curIndex] ? P.text : P.dim, wrap: 'truncate-end' }),
         ] })
       }) })
+    } else if (e.surface === 'terminal' || e.surface === 'desktop') {
+      // Drag the cards with the mouse; wheel over the pane steps them (ui.scroll).
+      main = Client({
+        key: 'carousel',
+        module: './carousel.js',
+        width: '100%',
+        props: { cards: seq.map(cardData), cur: curIndex, P },
+      })
     } else {
-      const prev = seq[curIndex - 1]
-      const next = seq[curIndex + 1]
-      const center = card(seq[curIndex], true)
-      if (wide) {
-        main = Box({ flexDirection: 'row', columnGap: 2, alignItems: 'center', children: [...(prev ? [card(prev, false)] : []), center, ...(next ? [card(next, false)] : [])] })
-      } else {
-        const before = seq.slice(Math.max(0, curIndex - 2), curIndex).map((s) => T(`${s.kind === 'fix' ? '⚑' : '✓'} ${textFor(s.view, level)}`, { key: 'pv-' + s.id, color: s.kind === 'fix' ? P.cats.fix : P.faint, wrap: 'truncate-end' }))
-        main = Box({ flexDirection: 'column', rowGap: 1, children: [...before, center] })
-      }
+      main = staticDeck()
     }
 
     // ---- session track: one mark per step, fixes as flags
