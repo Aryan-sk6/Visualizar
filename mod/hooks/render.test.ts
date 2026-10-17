@@ -51,3 +51,21 @@ test('Engineer level shows the real command', async ($, on) => {
   await ui.press({ key: 'lv-eng' })
   expect(await ui.find({ type: 'Code', text: 'npm test' })).toBeDefined()
 })
+
+test('opening the pane loads the earlier steps of the session', async ($, on) => {
+  let t = 1_760_000_000_000
+  on('clock.now', () => ({ value: (t += 1500) }))
+  on('session.messages', () => ({ value: [
+    { role: 'user', text: 'Make the top card bigger', toolUses: [] },
+    { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'old1', tool: 'Read', input: { file_path: '/p/README.md' }, text: 'ok' }] },
+    { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'old1', text: 'ok' }] },
+    { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'old2', tool: 'Bash', input: { command: 'npm test' }, text: 'fail', isError: true }] },
+  ] }))
+  const ui = await $.ui.mount(pane('desktop'))
+  expect(await ui.find({ type: 'Text', text: '3 steps' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Running the tests' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '● snag' })).toBeDefined()
+  await ui.press({ key: 'prev' })
+  await ui.press({ key: 'prev' })
+  expect(await ui.find({ type: 'Text', text: 'You asked: Make the top card bigger' })).toBeDefined()
+})
