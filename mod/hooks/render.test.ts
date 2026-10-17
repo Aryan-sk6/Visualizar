@@ -71,11 +71,33 @@ test('the wheel steps through cards in the Cards view', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: '2 / 3', in: 'carousel' })).toBeDefined()
 })
 
-test('Engineer level shows the real command', async ($, on) => {
-  await setup($, on)
+test('Engineer level shows a quick technical summary, not raw output', async ($, on) => {
+  let t = 1_760_000_000_000
+  on('clock.now', () => ({ value: (t += 1500) }))
+  on('tool.call', (_$: any, e: any) => {
+    if (e.tool === 'Bash' && e.command === 'npm test') return { result: { stdout: '> app@1 test\n> node --test\n\nℹ tests 12\nℹ pass 12\nℹ fail 0\n', stderr: '' } }
+    if (e.tool === 'Bash') return { deny: 'Error: build failed\nTS2304: Cannot find name foo' }
+    return { result: 'ok' }
+  })
+  await $.tool.call({ tool: 'Edit', file_path: '/p/src/components/TopCard.tsx', old_string: 'width: 200', new_string: 'width: 320\nheight: 180' } as any)
+  await $.tool.call({ tool: 'Bash', command: 'npm run build' } as any)
+  await $.tool.call({ tool: 'Bash', command: 'npm test', description: 'Run the tests' } as any)
   const ui = await $.ui.mount(pane('desktop'))
   await ui.press({ key: 'lv-eng' })
-  expect(await ui.find({ type: 'Code', text: 'npm test', in: 'carousel' })).toBeDefined()
+  const c = { in: 'carousel' }
+  expect(await ui.find({ type: 'Code', ...c })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: '$ npm test', ...c })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'exit ok', ...c })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'ℹ pass 12', ...c })).toBeDefined()
+  // The failed build, one card back: failed chip and the error line.
+  await ui.press({ key: 'prev' })
+  expect(await ui.find({ type: 'Text', text: 'failed', ...c })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'TS2304: Cannot find name foo', ...c })).toBeDefined()
+  // The edit: changed lines in +/− form and a line count chip.
+  await ui.press({ key: 'prev' })
+  expect(await ui.find({ type: 'Text', text: '+1 −1 lines'.replace('+1', '+2'), ...c })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '− width: 200', ...c })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '+ width: 320', ...c })).toBeDefined()
 })
 
 test('opening the pane loads the earlier steps of the session', async ($, on) => {

@@ -55,8 +55,8 @@ export function pushStep(steps, step) {
   return [...steps, step].slice(-MAX_STEPS);
 }
 
-export function finishStep(steps, id, { isError, now }) {
-  return steps.map((s) => (s.id === id ? { ...s, status: isError ? 'error' : 'done', endedAt: now } : s));
+export function finishStep(steps, id, { isError, now, result = null }) {
+  return steps.map((s) => (s.id === id ? { ...s, status: isError ? 'error' : 'done', endedAt: now, result } : s));
 }
 
 /** translate() from visualizar, guarded: an unexpected step never breaks the pane. */
