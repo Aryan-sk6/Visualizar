@@ -1,14 +1,13 @@
 // visualizar, inside Claude Code: a HUD pane showing what the agent is doing.
 // Read-only: it listens to events and reads .steer/fixes.jsonl, and writes nothing.
 //
-// Desktop and VS Code draw the HUD as one SVG (scene.js) that mirrors the
-// browser version. The terminal draws the same layout with boxes and a
-// coloured cell track.
+// The pane is built from Claude Code's own elements (boxes, borders, text
+// sizes, buttons, code), so it fills the pane, updates in place and looks
+// native in the Desktop app, VS Code and the terminal alike.
 import {
   LAYOUT_NAMES, LEVEL_NAMES, THEME_NAMES, PALETTES, catColor, startStep, pushStep, finishStep, viewOf, textFor,
-  clipTo, elapsed, stepTime, parseFixes, scanCells, toBase64, MAX_STEPS,
+  elapsed, stepTime, parseFixes,
 } from './hud.js'
-import { sceneSvg } from './scene.js'
 
 const PANE = 'visualizar'
 
@@ -25,6 +24,8 @@ let lastActivity = null
 let busy = false
 let isOpen = false
 let tick = 0
+// Which step the cards view centres on: null follows the live step.
+let pinned = null
 
 const CAT_LABEL = {
   you: 'YOU', say: 'CLAUDE', read: 'READ', write: 'WRITE', run: 'RUN', test: 'TEST', search: 'SEARCH',
@@ -114,12 +115,17 @@ export function register(on) {
     } catch {
       sessionId = null
     }
-    // Keep the clock and the terminal scan line moving while the pane is open.
-    $.clock.every(500, () => {
+    // While the pane is open: tick the clock once a second during a turn,
+    // and pick up new fixes every few seconds. Nothing redraws when idle.
+    $.clock.every(1000, () => {
       if (!isOpen) return
       tick++
-      if (tick % 4 === 0) void loadFixes($).then(() => redraw($))
-      else if (busy) redraw($)
+      if (tick % 3 === 0) {
+        const before = fixes.length
+        void loadFixes($).then(() => {
+          if (busy || fixes.length !== before) redraw($)
+        })
+      } else if (busy) redraw($)
     })
     return next(e)
   })
@@ -133,7 +139,7 @@ export function register(on) {
     await loadFixes($)
     const opened = await $.ui.open({ id: PANE, title: 'visualizar', focus: true })
     isOpen = opened.isPlaced
-    return { text: opened.isPlaced ? 'visualizar open. 1/2/3 layout · s/v/e detail · c/x theme · q close.' : 'visualizar is waiting for a wider window.' }
+    return { text: opened.isPlaced ? 'visualizar open. 1/2/3 layout · s/v/e detail · c/x theme · b/n step · l live.' : 'visualizar is waiting for a wider window.' }
   })
 
   on('ui.close', async ($, e, next) => {
@@ -186,153 +192,209 @@ export function register(on) {
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button, Raster, Svg } = $.ui.resolve(e)
+    const { Box, Text, Button, Code } = $.ui.resolve(e)
     const now = await $.clock.now()
     const P = PALETTES[theme]
     const cols = Math.max(24, e.props?.bodyColumns ?? 60)
-    const isDock = e.props?.placement === 'dock'
+    const wide = cols >= 90
     const seq = sequence()
     const st = nowState(seq, now)
+    const curIndex = pinned !== null && seq[pinned] ? pinned : st.cur
+    const follow = pinned === null || !seq[pinned]
 
-    // ---- controls: layout · detail · theme
+    const T = (children, props = {}) => Text({ ...props, children: [children] })
+    const label = (s, color = P.dim) => T(s, { color, size: 'caption', mono: true })
+
+    // ---- top bar: brand, live state, controls
     const seg = (prefix, names, value, set, keys) =>
-      Object.keys(names).map((name, i) =>
-        Button({
-          key: prefix + name,
-          label: names[name],
-          hotkey: keys[i],
-          plain: true,
-          dimColor: value !== name,
-          onPress: () => {
-            set(name)
-            redraw($)
-          },
-        }),
-      )
-    const controls = Box({
+      Box({
+        flexDirection: 'row',
+        columnGap: 1,
+        children: Object.keys(names).map((name, i) =>
+          Button({
+            key: prefix + name,
+            label: names[name],
+            hotkey: keys[i],
+            plain: true,
+            dimColor: value !== name,
+            onPress: () => {
+              set(name)
+              redraw($)
+            },
+          }),
+        ),
+      })
+    const top = Box({
       flexDirection: 'row',
       flexWrap: 'wrap',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      rowGap: 1,
       columnGap: 2,
       children: [
-        Box({ flexDirection: 'row', columnGap: 1, children: seg('ly-', LAYOUT_NAMES, layout, (v) => (layout = v), ['1', '2', '3']) }),
-        Box({ flexDirection: 'row', columnGap: 1, children: seg('lv-', LEVEL_NAMES, level, (v) => (level = v), ['s', 'v', 'e']) }),
-        Box({ flexDirection: 'row', columnGap: 1, children: seg('th-', THEME_NAMES, theme, (v) => (theme = v), ['c', 'x']) }),
-        Button({ key: 'close', label: 'Close', hotkey: 'q', plain: true, dimColor: true, onPress: () => { void $.ui.close({ id: PANE }) } }),
+        Box({ flexDirection: 'row', columnGap: 2, alignItems: 'center', children: [
+          T('◆ VISUALIZAR', { color: P.accent, weight: 'bold', mono: true }),
+          T(st.live ? ' ● LIVE ' : ' ○ IDLE ', { color: st.live ? P.bg : P.dim, backgroundColor: st.live ? P.accent : undefined, size: 'caption', mono: true, weight: 'semibold' }),
+        ] }),
+        Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 3, children: [
+          seg('ly-', LAYOUT_NAMES, layout, (v) => (layout = v), ['1', '2', '3']),
+          seg('lv-', LEVEL_NAMES, level, (v) => (level = v), ['s', 'v', 'e']),
+          seg('th-', THEME_NAMES, theme, (v) => (theme = v), ['c', 'x']),
+        ] }),
       ],
     })
 
-    // ---- Desktop and VS Code: the full HUD as one SVG
-    if (e.surface === 'desktop' || e.surface === 'vscode') {
-      const width = Math.round(Math.max(360, Math.min(1100, cols * 7.6)))
-      const d = {
-        ...st, seq, index: st.cur + 1, total: seq.length,
-        meta: [String(await $.session.model().catch(() => '')).replace(/^claude-/, '').toUpperCase(), `${seq.length} STEPS`].filter(Boolean).join(' · '),
-      }
-      return Box({
-        flexDirection: 'column',
-        rowGap: 1,
-        children: [
-          controls,
-          Svg({ source: sceneSvg(d, { width, level, layout, theme, now }), alt: `${st.nowLabel}: ${st.nowText}`, width, isInteractive: true }),
-        ],
-      })
-    }
-
-    // ---- Terminal: the same layout in boxes and cells
-    const header = Box({
+    // ---- NOW panel
+    const nowPanel = Box({
       flexDirection: 'row',
+      alignItems: 'center',
       columnGap: 2,
-      children: [
-        Text({ color: P.accent, weight: 'semibold', children: ['◆ VISUALIZAR'] }),
-        Text({ color: st.live ? P.accent : P.dim, children: [st.live ? '● LIVE' : '○ IDLE'] }),
-      ],
-    })
-    const nowBox = Box({
-      flexDirection: 'row',
-      columnGap: 2,
+      paddingX: 2,
+      paddingY: 1,
       borderStyle: 'round',
       borderColor: st.live ? P.accent : P.line2,
-      paddingX: 1,
+      backgroundColor: P.panel,
       children: [
-        Text({ color: st.live ? P.accent2 : P.dim, children: [GLYPH[st.nowIcon] || '◆'] }),
-        Box({
-          flexDirection: 'column',
-          flexGrow: 1,
-          children: [
-            Text({ color: P.dim, children: [st.nowLabel] }),
-            Text({ weight: 'semibold', color: st.live ? P.text : P.dim, wrap: 'truncate-end', children: [st.nowText] }),
-          ],
-        }),
-        Text({ color: P.accent2, children: [st.clock] }),
+        Box({ borderStyle: 'round', borderColor: st.live ? P.accent : P.line2, paddingX: 1, children: [T(GLYPH[st.nowIcon] || '◆', { color: st.live ? P.accent2 : P.dim, size: 'heading' })] }),
+        Box({ flexDirection: 'column', flexGrow: 1, flexShrink: 1, children: [
+          label(st.nowLabel),
+          T(st.nowText, { color: st.live ? P.text : P.dim, size: 'title', weight: 'bold', wrap: 'truncate-end' }),
+        ] }),
+        Box({ flexDirection: 'column', alignItems: 'flex-end', children: [
+          T(st.clock, { color: P.accent2, size: 'heading', mono: true, tabular: true }),
+          label(`${seq.length} steps`),
+        ] }),
       ],
     })
 
-    const line = (s, isCur) => {
+    const statusOf = (s) => {
+      if (s.kind === 'fix') return [P.cats.fix, s.deliveredAt ? 'delivered' : 'logged']
+      if (s.kind !== 'tool') return [P.dim, s.time]
+      const d = elapsed((s.endedAt ?? now) - s.startedAt)
+      if (s.status === 'running') return [P.accent, `working · ${d}`]
+      if (s.status === 'error') return [P.error, `snag · ${d}`]
+      return [P.ok, `done · ${d}`]
+    }
+    const kindLabel = (s) => (CAT_LABEL[s.view.cat] || 'STEP') + (s.side ? ' · HELPER' : '')
+
+    // A step card. big = the centre one.
+    const card = (s, big) => {
       const color = catColor(P, s.view.cat)
-      const mark = s.kind === 'fix' ? '⚑' : s.status === 'running' ? '▶' : s.status === 'error' ? '✗' : '✓'
-      return Text({ key: s.id, color: isCur || s.kind === 'fix' ? color : P.faint, wrap: 'truncate-end', children: [`${mark} ${textFor(s.view, level)}`] })
+      const [sc, sl] = statusOf(s)
+      const children = [
+        Box({ flexDirection: 'row', columnGap: 2, alignItems: 'center', children: [
+          Box({ borderStyle: 'round', borderColor: color, paddingX: 1, children: [T(GLYPH[s.view.icon] || '◆', { color, size: big ? 'heading' : 'body' })] }),
+          Box({ flexDirection: 'column', children: [label(kindLabel(s), color), label(s.time, P.faint)] }),
+        ] }),
+        T(textFor(s.view, level), { color: big ? P.text : P.dim, size: big ? 'title' : 'body', weight: big ? 'bold' : 'medium', wrap: big ? 'wrap' : 'truncate-end' }),
+      ]
+      if (big && level === 'vibe' && s.kind === 'tool') children.push(T(s.view.simple, { color: P.dim }))
+      if (big && level === 'eng' && s.kind === 'tool' && s.view.eng?.body) {
+        const body = s.view.eng.body.length > 900 ? s.view.eng.body.slice(0, 900) + '\n…' : s.view.eng.body
+        children.push(s.view.eng.lang === 'diff'
+          ? Code({ format: 'diff', source: '@@ -1 +1 @@\n' + body.replace(/^- /gm, '-').replace(/^\+ /gm, '+') })
+          : Code({ language: s.view.eng.lang === 'shell' ? 'bash' : 'text', source: body }))
+      }
+      children.push(Box({ flexDirection: 'row', justifyContent: 'space-between', children: [
+        T(`● ${sl}`, { color: sc, size: 'caption' }),
+        ...(big ? [label(`${curIndex + 1} / ${seq.length}`, P.faint)] : []),
+      ] }))
+      return Box({
+        key: (big ? 'big-' : 'card-') + s.id,
+        flexDirection: 'column',
+        rowGap: big ? 1 : 0,
+        paddingX: big ? 2 : 1,
+        paddingY: big ? 1 : 0,
+        borderStyle: big ? 'bold' : 'round',
+        borderColor: big ? color : P.line2,
+        backgroundColor: big ? P.panel2 : P.panel,
+        ...(big ? { flexGrow: 1, flexShrink: 1 } : wide ? { width: '24%' } : {}),
+        children,
+      })
     }
 
-    let body = []
-    if (layout === 'flow') {
-      const recent = seq.slice(Math.max(0, st.cur - (isDock ? 6 : 4)), st.cur + 1)
+    // ---- the main view
+    let main
+    if (!seq.length) {
+      main = Box({ paddingY: 2, justifyContent: 'center', children: [T('No steps yet. They appear here as Claude works.', { color: P.dim })] })
+    } else if (layout === 'flow') {
+      const recent = seq.slice(Math.max(0, curIndex - 6), curIndex + 1)
+      const nodes = []
       recent.forEach((s, i) => {
-        if (i > 0) body.push(Text({ key: 'a' + s.id, color: P.line2, children: [s.kind === 'fix' ? '├╌╌' : '│'] }))
-        body.push(line(s, i === recent.length - 1))
-      })
-    } else if (layout === 'timeline') {
-      body = seq.slice(-(isDock ? 10 : 6)).map((s, i, arr) => Box({
-        key: s.id, flexDirection: 'row', columnGap: 1, children: [
-          Text({ color: P.faint, children: [stepTime(s, steps[0]?.startedAt ?? now)] }),
-          Text({ color: catColor(P, s.view.cat), children: [s.kind === 'fix' ? '⚑' : i === arr.length - 1 ? '┣' : '┃'] }),
-          line(s, i === arr.length - 1),
-        ],
-      }))
-    } else {
-      const c = seq[st.cur]
-      const before = seq.slice(Math.max(0, st.cur - (isDock ? 3 : 2)), st.cur)
-      body = before.map((s) => line(s, false))
-      if (c) {
-        const color = catColor(P, c.view.cat)
-        const sub = level === 'vibe' && c.kind === 'tool' ? c.view.simple : level === 'simple' ? '' : c.view.vibe
-        const status = c.kind !== 'tool' ? c.time : c.status === 'running' ? `● working · ${elapsed(now - c.startedAt)}` : c.status === 'error' ? '✗ snag' : '✓ done'
-        body.push(Box({
-          key: 'card-' + c.id,
-          flexDirection: 'column',
-          borderStyle: 'bold',
-          borderColor: color,
-          paddingX: 1,
+        const isCur = i === recent.length - 1
+        if (i > 0) nodes.push(Box({ key: 'ar-' + s.id, paddingLeft: 2, children: [T('↓', { color: P.line2 })] }))
+        if (s.kind === 'fix') {
+          nodes.push(Box({ key: 'fx-' + s.id, marginLeft: 4, flexDirection: 'column', paddingX: 1, borderStyle: 'dashed', borderColor: P.cats.fix, children: [
+            label(s.urgent ? '⚑ URGENT FIX LANDED HERE' : '⚑ FIX LANDED HERE', P.cats.fix),
+            T(s.text, { color: P.text, wrap: 'wrap' }),
+          ] }))
+          return
+        }
+        const color = catColor(P, s.view.cat)
+        const [sc, sl] = statusOf(s)
+        nodes.push(Box({
+          key: 'nd-' + s.id, flexDirection: 'row', columnGap: 2, alignItems: 'center', paddingX: 1,
+          borderStyle: isCur ? 'bold' : 'round', borderColor: isCur ? color : P.line2, backgroundColor: s.kind === 'prompt' ? P.panel2 : P.panel,
           children: [
-            Box({ flexDirection: 'row', columnGap: 2, children: [
-              Text({ color, weight: 'semibold', children: [`${GLYPH[c.view.icon] || '◆'} ${CAT_LABEL[c.view.cat] || 'STEP'}`] }),
-              Text({ color: P.faint, children: [c.time] }),
+            T(GLYPH[s.view.icon] || '◆', { color }),
+            Box({ flexDirection: 'column', flexGrow: 1, flexShrink: 1, children: [
+              T(textFor(s.view, level), { color: isCur ? P.text : P.dim, weight: isCur ? 'semibold' : 'regular', wrap: 'truncate-end' }),
+              T(`● ${sl}`, { color: sc, size: 'caption' }),
             ] }),
-            Text({ weight: 'semibold', color: P.text, wrap: 'wrap', children: [textFor(c.view, level)] }),
-            ...(sub && sub !== textFor(c.view, level) ? [Text({ color: P.dim, wrap: 'truncate-end', children: [sub] })] : []),
-            Text({ color: c.status === 'running' ? P.accent : P.dim, children: [`${status}   ${st.cur + 1} / ${seq.length}`] }),
           ],
         }))
+      })
+      main = Box({ flexDirection: 'column', children: nodes })
+    } else if (layout === 'timeline') {
+      const lastPrompt = [...seq].reverse().findIndex((s) => s.kind === 'prompt')
+      const turn = lastPrompt >= 0 ? seq.slice(seq.length - 1 - lastPrompt) : seq.slice(-12)
+      const t0 = turn[0].startedAt
+      const span = Math.max(10_000, now - t0)
+      const barRoom = Math.max(8, Math.min(40, cols - 40))
+      main = Box({ flexDirection: 'column', rowGap: 0, children: turn.slice(-14).map((s) => {
+        const color = s.kind === 'fix' ? P.cats.fix : catColor(P, s.view.cat)
+        const start = Math.round(((s.startedAt - t0) / span) * barRoom)
+        const len = s.kind === 'tool' ? Math.max(1, Math.round((((s.endedAt ?? now) - s.startedAt) / span) * barRoom)) : 1
+        const mark = s.kind === 'fix' ? '⚑' : s.kind === 'prompt' ? '┃' : '█'.repeat(len)
+        return Box({ key: 'tl-' + s.id, flexDirection: 'row', columnGap: 1, children: [
+          label(stepTime(s, t0), P.faint),
+          T(' '.repeat(start) + mark + ' '.repeat(Math.max(0, barRoom - start - len)), { color, mono: true }),
+          T(textFor(s.view, level), { color: s === seq[curIndex] ? P.text : P.dim, wrap: 'truncate-end' }),
+        ] })
+      }) })
+    } else {
+      const prev = seq[curIndex - 1]
+      const next = seq[curIndex + 1]
+      const center = card(seq[curIndex], true)
+      if (wide) {
+        main = Box({ flexDirection: 'row', columnGap: 2, alignItems: 'center', children: [...(prev ? [card(prev, false)] : []), center, ...(next ? [card(next, false)] : [])] })
+      } else {
+        const before = seq.slice(Math.max(0, curIndex - 2), curIndex).map((s) => T(`${s.kind === 'fix' ? '⚑' : '✓'} ${textFor(s.view, level)}`, { key: 'pv-' + s.id, color: s.kind === 'fix' ? P.cats.fix : P.faint, wrap: 'truncate-end' }))
+        main = Box({ flexDirection: 'column', rowGap: 1, children: [...before, center] })
       }
     }
 
-    // Coloured track of the whole session: one cell per step, fixes as ⚑.
-    const track = []
-    if (seq.length) {
-      const n = Math.min(seq.length, cols - 2, MAX_STEPS * 2)
-      const shown = seq.slice(-n)
-      const words = new Uint32Array(n * 3)
-      const hex = (h) => parseInt(h.slice(1), 16)
-      shown.forEach((s, i) => {
-        const isCur = s === seq[st.cur]
-        const cp = s.kind === 'fix' ? 0x2691 : isCur ? 0x2588 : s.kind === 'prompt' ? 0x2503 : 0x2585
-        const fg = s.kind === 'fix' ? hex(P.cats.fix) : isCur ? hex(catColor(P, s.view.cat)) : hex(catColor(P, s.view.cat)) & 0x7f7f7f
-        words.set([cp, fg, hex(P.bg)], i * 3)
-      })
-      track.push(Box({ children: [Raster({ key: 'track', columns: n, rows: 1, cells: toBase64(new Uint8Array(words.buffer)) })] }))
-    }
-    const scan = Box({ children: [Raster({ key: 'scan', columns: cols, rows: 1, cells: scanCells(cols, tick, st.live, P) })] })
-    const empty = seq.length === 0 ? [Text({ color: P.dim, children: ['No steps yet. They appear here as Claude works.'] })] : []
+    // ---- session track: one mark per step, fixes as flags
+    const shown = seq.slice(-Math.max(10, Math.min(80, cols - 4)))
+    const track = Box({ flexDirection: 'row', flexWrap: 'wrap', children: shown.map((s) => {
+      const isCur = s === seq[curIndex]
+      const ch = s.kind === 'fix' ? '⚑' : s.kind === 'prompt' ? '┃' : isCur ? '█' : '▮'
+      return T(ch, { key: 'tk-' + s.id, color: s.kind === 'fix' ? P.cats.fix : isCur ? catColor(P, s.view.cat) : P.line2, mono: true })
+    }) })
 
-    return Box({ flexDirection: 'column', children: [header, controls, nowBox, scan, ...empty, ...body, ...track] })
+    // ---- stepping through the session
+    const nav = Box({ flexDirection: 'row', columnGap: 2, alignItems: 'center', children: [
+      Button({ key: 'prev', label: '◀', hotkey: 'b', plain: true, dimColor: curIndex <= 0, onPress: () => { pinned = Math.max(0, curIndex - 1); redraw($) } }),
+      Button({ key: 'next', label: '▶', hotkey: 'n', plain: true, dimColor: follow, onPress: () => { pinned = curIndex + 1 >= seq.length - 1 ? null : curIndex + 1; redraw($) } }),
+      Button({ key: 'live', label: follow ? 'Following live' : 'Back to live', hotkey: 'l', plain: true, dimColor: follow, onPress: () => { pinned = null; redraw($) } }),
+    ] })
+
+    return Box({
+      flexDirection: 'column',
+      rowGap: 1,
+      padding: 1,
+      backgroundColor: P.bg,
+      children: [top, nowPanel, main, ...(seq.length ? [track, nav] : [])],
+    })
   })
 }
