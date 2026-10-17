@@ -1,0 +1,11 @@
+{
+  "name": "visualizar",
+  "owner": { "name": "visualizar" },
+  "plugins": [
+    {
+      "name": "visualizar",
+      "source": "./mod",
+      "description": "A sci-fi HUD pane showing what Claude is doing right now, with steering fixes flagged in red"
+    }
+  ]
+}

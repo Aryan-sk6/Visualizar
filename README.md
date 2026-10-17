@@ -119,6 +119,14 @@ Keys while the pane has focus: `s` Simple, `v` Vibe, `e` Engineer, `q` closes it
 
 It is fed by Claude Code's mod events (`turn.start`, `tool.call`), not by parsing the transcript, and it is read-only: it never writes to transcripts or `fixes.jsonl`. The phrases come from `src/translate.js`; the mod runs in a sandbox with no Node, so `mod/hooks/translate.js` is generated from it. After changing `src/translate.js`, run `node mod/build.mjs` (`--check` verifies it is current).
 
+Install it from this repository instead of a local folder (terminal):
+
+```
+/plugin install visualizar --marketplace sk82santhosh-cpu/Visualizar
+```
+
+From a shell: `claude plugin install visualizar --marketplace sk82santhosh-cpu/Visualizar`. In the Desktop app, click + next to the prompt box, then Plugins, Add marketplace with `sk82santhosh-cpu/Visualizar`, then Add plugin. In VS Code, the terminal command works from Claude Code's prompt.
+
 Check it with `claude plugin validate ./mod` and `claude plugin test ./mod`. Claude Code asks you to trust the folder before it loads a mod's hooks.
 
 ## Things to know
