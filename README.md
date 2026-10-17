@@ -115,7 +115,7 @@ Then type `/visualizar` (it also works mid-turn). The pane is a sidebar beside t
 - **Fixes** from `<project>/.steer/fixes.jsonl` as red flags.
 - A scanline strip: a character-cell `Raster` in the terminal, an animated `Svg` on Desktop and VS Code.
 
-Keys while the pane has focus: `s` Simple, `v` Vibe, `e` Engineer, `q` closes it, Esc returns to the prompt. (VS Code buttons have no hotkeys; click them.) Run `/visualizar` again to close.
+Layouts (like the browser tool): **Cards** (the default), **Flow** (a chain of steps, `read ─▶ edit ─▶ test`) and **Timeline** (a spine with the time each step began). Keys while the pane has focus: `1` Cards, `2` Flow, `3` Timeline, `s` Simple, `v` Vibe, `e` Engineer, `q` closes it, Esc returns to the prompt. (VS Code buttons have no hotkeys; click them.) Run `/visualizar` again to close.
 
 It is fed by Claude Code's mod events (`turn.start`, `tool.call`), not by parsing the transcript, and it is read-only: it never writes to transcripts or `fixes.jsonl`. The phrases come from `src/translate.js`; the mod runs in a sandbox with no Node, so `mod/hooks/translate.js` is generated from it. After changing `src/translate.js`, run `node mod/build.mjs` (`--check` verifies it is current).
 

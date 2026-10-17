@@ -1,8 +1,8 @@
 // visualizar, inside Claude Code: a HUD pane showing what the agent is doing.
 // Read-only: it listens to events and reads .steer/fixes.jsonl, and writes nothing.
 import {
-  COLORS, LEVELS, LEVEL_NAMES, startStep, pushStep, finishStep, viewOf, textFor,
-  clipTo, elapsed, parseFixes, scanCells, stripSvg,
+  COLORS, LAYOUTS, LAYOUT_NAMES, LEVEL_NAMES, startStep, pushStep, finishStep, viewOf, textFor,
+  clipTo, elapsed, stepTime, parseFixes, scanCells, stripSvg,
 } from './hud.js'
 
 const PANE = 'visualizar'
@@ -10,6 +10,7 @@ const PANE = 'visualizar'
 // Module variables: a hot reload resets them, which only costs the step history.
 let steps = []
 let level = 'simple'
+let layout = 'cards'
 let fixes = []
 let cwd = ''
 let turnStart = null
@@ -61,7 +62,7 @@ export function register(on) {
     await loadFixes($)
     const opened = await $.ui.open({ id: PANE, title: 'visualizar', focus: true })
     isOpen = opened.isPlaced
-    return { text: opened.isPlaced ? 'visualizar HUD open. s / v / e change detail, q closes.' : 'visualizar HUD waits for a wider terminal.' }
+    return { text: opened.isPlaced ? 'visualizar HUD open. 1 / 2 / 3 change layout, s / v / e change detail, q closes.' : 'visualizar HUD waits for a wider terminal.' }
   })
 
   on('ui.close', async ($, e, next) => {
@@ -124,12 +125,27 @@ export function register(on) {
           redraw($)
         },
       })
+    const layoutButton = (name, hotkey) =>
+      Button({
+        key: 'ly-' + name,
+        label: LAYOUT_NAMES[name],
+        hotkey,
+        plain: true,
+        dimColor: layout !== name,
+        onPress: () => {
+          layout = name
+          redraw($)
+        },
+      })
     const header = Box({
       flexDirection: 'row',
       columnGap: 2,
       children: [
         Text({ bold: true, color: COLORS.cyan, children: ['◢ VISUALIZAR ◣'] }),
         Text({ color: running ? COLORS.green : COLORS.dim, children: [running ? '● LIVE' : '○ IDLE'] }),
+        layoutButton('cards', '1'),
+        layoutButton('flow', '2'),
+        layoutButton('timeline', '3'),
         levelButton('simple', 's'),
         levelButton('vibe', 'v'),
         levelButton('eng', 'e'),
@@ -163,18 +179,45 @@ export function register(on) {
       ],
     })
 
-    // ---- recent steps: bordered cards in a sidebar, one-liners above the prompt
+    // ---- recent steps, laid out as Cards, Flow or Timeline
+    const markOf = (s) => (s.status === 'running' ? '▶' : s.status === 'error' ? '✗' : '✓')
+    const colorOf = (s, isCurrent) => (s.status === 'error' ? COLORS.red : isCurrent ? COLORS.cyan : COLORS.dim)
     const room = isDock ? 4 : Math.max(1, Math.min(3, (e.viewport?.rows ?? 24) / 4 | 0))
-    const recent = steps.slice(-room)
-    const cards = recent.map((s, i) => {
-      const isCurrent = i === recent.length - 1 && s.status === 'running'
-      const mark = s.status === 'running' ? '▶' : s.status === 'error' ? '✗' : '✓'
-      const color = s.status === 'error' ? COLORS.red : isCurrent ? COLORS.cyan : COLORS.dim
-      const line = Text({ bold: isCurrent, dimColor: !isCurrent && s.status !== 'error', color, children: [clipTo(`${mark} ${textFor(view(s), level)}`, cols - (isDock ? 6 : 2))] })
-      return isDock
-        ? Box({ key: s.id, borderStyle: isCurrent ? 'bold' : 'round', borderColor: color, paddingX: 1, children: [line] })
-        : Box({ key: s.id, children: [line] })
-    })
+    let body
+    if (layout === 'flow') {
+      // A chain of short nodes: ✓ Reading ─▶ ✓ Editing ─▶ ▶ Running the tests
+      const recent = steps.slice(-(isDock ? 6 : 5))
+      const nodes = []
+      recent.forEach((s, i) => {
+        const isCurrent = i === recent.length - 1 && s.status === 'running'
+        if (i > 0) nodes.push(Text({ key: 'a' + i, color: COLORS.dim, children: ['─▶'] }))
+        nodes.push(Text({ key: s.id, bold: isCurrent, dimColor: !isCurrent && s.status !== 'error', color: colorOf(s, isCurrent), children: [`${markOf(s)} ${clipTo(textFor(view(s), 'simple'), 16)}`] }))
+      })
+      body = nodes.length ? [Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, children: nodes })] : []
+    } else if (layout === 'timeline') {
+      // A spine with the time each step began: 0:07 ┃ ✓ Reading a file
+      const recent = steps.slice(-(isDock ? 8 : room + 1))
+      body = recent.map((s, i) => {
+        const isCurrent = i === recent.length - 1 && s.status === 'running'
+        const c = colorOf(s, isCurrent)
+        return Box({ key: s.id, flexDirection: 'row', columnGap: 1, children: [
+          Text({ dimColor: true, children: [stepTime(s, turnStart)] }),
+          Text({ color: c, children: [isCurrent ? '┣' : '┃'] }),
+          Text({ bold: isCurrent, dimColor: !isCurrent && s.status !== 'error', color: c, children: [clipTo(`${markOf(s)} ${textFor(view(s), level)}`, cols - 9)] }),
+        ] })
+      })
+    } else {
+      // Cards: bordered in a sidebar, one-liners above the prompt
+      const recent = steps.slice(-room)
+      body = recent.map((s, i) => {
+        const isCurrent = i === recent.length - 1 && s.status === 'running'
+        const color = colorOf(s, isCurrent)
+        const line = Text({ bold: isCurrent, dimColor: !isCurrent && s.status !== 'error', color, children: [clipTo(`${markOf(s)} ${textFor(view(s), level)}`, cols - (isDock ? 6 : 2))] })
+        return isDock
+          ? Box({ key: s.id, borderStyle: isCurrent ? 'bold' : 'round', borderColor: color, paddingX: 1, children: [line] })
+          : Box({ key: s.id, children: [line] })
+      })
+    }
 
     // ---- fixes from .steer/fixes.jsonl, as red flags
     const flags = fixes.map((f, i) =>
@@ -184,6 +227,6 @@ export function register(on) {
     )
 
     const empty = steps.length === 0 ? [Text({ dimColor: true, children: ['No steps yet. They appear as Claude works.'] })] : []
-    return Box({ flexDirection: 'column', children: [header, strip, nowLine, ...empty, ...cards, ...flags] })
+    return Box({ flexDirection: 'column', children: [header, strip, nowLine, ...empty, ...body, ...flags] })
   })
 }
