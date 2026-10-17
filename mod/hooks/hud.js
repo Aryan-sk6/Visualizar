@@ -4,6 +4,8 @@ import { translate } from './translate.js';
 
 export const LEVELS = ['simple', 'vibe', 'eng'];
 export const LEVEL_NAMES = { simple: 'Simple', vibe: 'Vibe', eng: 'Engineer' };
+export const LAYOUTS = ['cards', 'flow', 'timeline'];
+export const LAYOUT_NAMES = { cards: 'Cards', flow: 'Flow', timeline: 'Timeline' };
 export const MAX_STEPS = 12;
 
 export const COLORS = {
@@ -68,6 +70,11 @@ export function clipTo(s, n) {
 export function elapsed(ms) {
   const s = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/** When a step began, relative to the turn: "0:07". */
+export function stepTime(step, turnStart) {
+  return elapsed(turnStart === null ? 0 : step.startedAt - turnStart);
 }
 
 /** The last `n` fixes from fixes.jsonl text, newest last. Unreadable lines are skipped. */

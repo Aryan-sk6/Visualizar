@@ -1,5 +1,5 @@
 import { test, expect } from 'claude-code/testing'
-import { startStep, finishStep, pushStep, viewOf, textFor, elapsed, parseFixes, scanCells, MAX_STEPS } from './hud.js'
+import { startStep, finishStep, pushStep, viewOf, textFor, elapsed, parseFixes, stepTime, LAYOUTS, scanCells, MAX_STEPS } from './hud.js'
 
 test('translates a tool call into the three levels', () => {
   const step = startStep({ tool: 'Edit', tool_use_id: 't1', file_path: '/p/src/TopCard.tsx', old_string: 'a', new_string: 'b' }, 0)
@@ -26,4 +26,10 @@ test('formats time and fixes, skipping bad lines', () => {
 test('the scan strip has one cell triplet per column', () => {
   // 8 columns * 3 u32 * 4 bytes = 96 bytes -> 128 base64 chars
   expect(scanCells(8, 3, true).length).toBe(128)
+})
+
+test('timeline times are relative to the turn start', () => {
+  const step = startStep({ tool: 'Read', tool_use_id: 'r', file_path: '/x' }, 7000)
+  expect(stepTime(step, 0)).toBe('0:07')
+  expect(LAYOUTS.length).toBe(3)
 })
