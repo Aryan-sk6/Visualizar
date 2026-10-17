@@ -6,15 +6,28 @@ export const LEVELS = ['simple', 'vibe', 'eng'];
 export const LEVEL_NAMES = { simple: 'Simple', vibe: 'Vibe', eng: 'Engineer' };
 export const LAYOUTS = ['cards', 'flow', 'timeline'];
 export const LAYOUT_NAMES = { cards: 'Cards', flow: 'Flow', timeline: 'Timeline' };
-export const MAX_STEPS = 12;
+export const MAX_STEPS = 40;
+export const THEMES = ['claude', 'codex'];
+export const THEME_NAMES = { claude: 'Claude', codex: 'Codex' };
 
-export const COLORS = {
-  cyan: '#38e8ff',
-  dim: '#2a6f7c',
-  amber: '#ffb347',
-  green: '#4dffa6',
-  red: '#ff4d5e',
+// Same palettes as the browser UI (public/styles.css). Solid hex only, so the
+// terminal can use them too.
+export const PALETTES = {
+  claude: {
+    bg: '#11100f', panel: '#1c1a17', panel2: '#241f1b', line: '#2b2925', line2: '#45413b',
+    text: '#ece9e0', dim: '#9a958a', faint: '#6b665d', accent: '#d97757', accent2: '#f0b48c',
+    grid: '#1a1612', ok: '#9ccb8a', error: '#ff7a6b',
+    cats: { you: '#f0b48c', say: '#ece9e0', read: '#8fb8de', write: '#e0875f', run: '#c7a0dc', test: '#9ccb8a', search: '#7fc4c0', web: '#86a9e8', plan: '#e0c26a', agent: '#b39ddb', ask: '#f5a3b5', tool: '#b8b2a6', fix: '#ff5f7e' },
+  },
+  codex: {
+    bg: '#090b0e', panel: '#10151b', panel2: '#151c24', line: '#1e252d', line2: '#36414c',
+    text: '#e6edf3', dim: '#8b98a5', faint: '#5b6773', accent: '#7dd3fc', accent2: '#e6edf3',
+    grid: '#0f151a', ok: '#86efac', error: '#f87171',
+    cats: { you: '#e6edf3', say: '#c9d6e2', read: '#7dd3fc', write: '#a5b4fc', run: '#c4b5fd', test: '#86efac', search: '#5eead4', web: '#93c5fd', plan: '#fde68a', agent: '#d8b4fe', ask: '#f9a8d4', tool: '#94a3b8', fix: '#fb7185' },
+  },
 };
+
+export const catColor = (P, cat) => P.cats[cat] || P.cats.tool;
 
 /** A new running step from a tool.call event. */
 export function startStep(e, now) {
@@ -78,13 +91,22 @@ export function stepTime(step, turnStart) {
 }
 
 /** The last `n` fixes from fixes.jsonl text, newest last. Unreadable lines are skipped. */
-export function parseFixes(raw, n = 3) {
+export function parseFixes(raw, n = 50) {
   const out = [];
   for (const line of String(raw || '').split('\n')) {
     if (!line.trim()) continue;
     try {
       const f = JSON.parse(line);
-      if (typeof f.text === 'string') out.push({ text: f.text, urgent: f.urgency === 'urgent' });
+      if (typeof f.text !== 'string') continue;
+      const at = Date.parse(f.delivered_at || f.ts || '');
+      out.push({
+        text: f.text,
+        urgent: f.urgency === 'urgent',
+        at: Number.isFinite(at) ? at : null,
+        sessionId: f.session_id ?? null,
+        deliveredAt: f.delivered_at ?? null,
+        doing: f.doing ?? null,
+      });
     } catch {
       /* skip */
     }
@@ -118,33 +140,20 @@ const mix = (a, b, t) => {
  * One row of cells: a bright head sweeping left to right with a fading trail
  * while busy, a dim static rule when idle. Returns the Raster `cells` string.
  */
-export function scanCells(columns, tick, busy) {
+export function scanCells(columns, tick, busy, P = PALETTES.claude) {
   const words = new Uint32Array(columns * 3);
-  const bg = 0x05161a;
+  const bg = hex(P.bg);
   const head = ((tick * 2) % (columns + 8)) - 4;
   for (let x = 0; x < columns; x++) {
     let cp = 0x2500; // ─
-    let fg = hex(COLORS.dim);
+    let fg = hex(P.line2);
     if (busy) {
       const d = head - x;
-      if (d === 0) { cp = 0x2588; fg = hex(COLORS.cyan); }
-      else if (d > 0 && d < 7) { cp = d < 3 ? 0x2593 : d < 5 ? 0x2592 : 0x2591; fg = mix(hex(COLORS.cyan), hex(COLORS.dim), d / 7); }
+      if (d === 0) { cp = 0x2588; fg = hex(P.accent); }
+      else if (d > 0 && d < 7) { cp = d < 3 ? 0x2593 : d < 5 ? 0x2592 : 0x2591; fg = mix(hex(P.accent), hex(P.line2), d / 7); }
       else if (x % 4 === 0) cp = 0x2574; // ╴ tick marks
     }
     words.set([cp, fg, bg], x * 3);
   }
   return toBase64(new Uint8Array(words.buffer));
-}
-
-/** Animated strip for the surfaces with Svg (Desktop, VS Code). */
-export function stripSvg(width, busy) {
-  const h = 6;
-  const bar = busy
-    ? `<rect y="1" width="60" height="4" rx="2" fill="url(#g)"><animate attributeName="x" from="-60" to="${width}" dur="1.6s" repeatCount="indefinite"/></rect>`
-    : '';
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${h}" viewBox="0 0 ${width} ${h}">` +
-    `<defs><linearGradient id="g"><stop offset="0" stop-color="${COLORS.cyan}" stop-opacity="0"/><stop offset="1" stop-color="${COLORS.cyan}"/></linearGradient></defs>` +
-    `<rect y="2" width="${width}" height="2" rx="1" fill="${COLORS.dim}" opacity="0.5"/>${bar}</svg>`
-  );
 }

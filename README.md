@@ -108,14 +108,12 @@ The same idea as a Claude Code mod: a sci-fi HUD pane drawn inside Claude Code i
 claude --plugin-dir ./mod
 ```
 
-Then type `/visualizar` (it also works mid-turn). The pane is a sidebar beside the transcript in a wide fullscreen terminal, or a framed region above the prompt otherwise. It shows:
+Then type `/visualizar` (it also works mid-turn). The pane is a sidebar beside the transcript in a wide window, or a framed region above the prompt otherwise.
 
-- **NOW**: the current step in plain English, with elapsed time for the turn.
-- **Recent steps** as compact cards, the current one emphasised (✓ done, ✗ failed, ▶ running).
-- **Fixes** from `<project>/.steer/fixes.jsonl` as red flags.
-- A scanline strip: a character-cell `Raster` in the terminal, an animated `Svg` on Desktop and VS Code.
+- **Desktop app and VS Code**: the pane draws the same HUD as the browser tab, as one animated SVG. The NOW strip has a pulsing icon ring and a sweep line. The current step is a big glowing card in the centre with the steps before and after faded beside it. Under it is a coloured track of the whole session, with your fixes as red flags.
+- **Terminal**: the same layout in cells: a boxed NOW line, the current step as a bold-bordered card with the previous steps above it, and a coloured cell track.
 
-Layouts (like the browser tool): **Cards** (the default), **Flow** (a chain of steps, `read ─▶ edit ─▶ test`) and **Timeline** (a spine with the time each step began). Keys while the pane has focus: `1` Cards, `2` Flow, `3` Timeline, `s` Simple, `v` Vibe, `e` Engineer, `q` closes it, Esc returns to the prompt. (VS Code buttons have no hotkeys; click them.) Run `/visualizar` again to close.
+It also shows your prompts as cards and this session's fixes from `<project>/.steer/fixes.jsonl` where they landed. Layouts match the browser tool: **Cards** (the default), **Flow** and **Timeline** (the current turn on lanes). Keys while the pane has focus: `1` Cards, `2` Flow, `3` Timeline, `s` Simple, `v` Vibe, `e` Engineer, `c` Claude theme, `x` Codex theme, `q` closes it, Esc returns to the prompt. (VS Code buttons have no hotkeys; click them.) Run `/visualizar` again to close.
 
 It is fed by Claude Code's mod events (`turn.start`, `tool.call`), not by parsing the transcript, and it is read-only: it never writes to transcripts or `fixes.jsonl`. The phrases come from `src/translate.js`; the mod runs in a sandbox with no Node, so `mod/hooks/translate.js` is generated from it. After changing `src/translate.js`, run `node mod/build.mjs` (`--check` verifies it is current).
 
