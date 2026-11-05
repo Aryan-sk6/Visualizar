@@ -12,7 +12,7 @@ the middle, and the steps around it, at the level of detail you pick:
 | **Vibe** | Changed `src/components/TopCard.tsx` — swapped 3 lines for 5 |
 | **Engineer** | `Edit src/components/TopCard.tsx` with the diff, or `$ npm test` with its output |
 
-Fixes you send with [inject](https://github.com/sk82santhosh-cpu/Inject) show up
+Fixes you send with [inject](https://github.com/Aryan-sk6/Inject) show up
 exactly where they landed, and a **Mistakes** panel keeps a list of them per project.
 
 ## Quickstart
@@ -119,10 +119,10 @@ It is fed by Claude Code's mod events (`turn.start`, `tool.call`), not by parsin
 Install it from this repository instead of a local folder (terminal):
 
 ```
-/plugin install visualizar --marketplace sk82santhosh-cpu/Visualizar
+/plugin install visualizar --marketplace Aryan-sk6/Visualizar
 ```
 
-From a shell: `claude plugin install visualizar --marketplace aryan-sk6/Visualizar`. In the Desktop app, click + next to the prompt box, then Plugins, Add marketplace with `aryan-sk6/Visualizar`, then Add plugin. In VS Code, the terminal command works from Claude Code's prompt.
+From a shell: `claude plugin install visualizar --marketplace Aryan-sk6/Visualizar`. In the Desktop app, click + next to the prompt box, then Plugins, Add marketplace with `Aryan-sk6/Visualizar`, then Add plugin. In VS Code, the terminal command works from Claude Code's prompt.
 
 Check it with `claude plugin validate ./mod` and `claude plugin test ./mod`. Claude Code asks you to trust the folder before it loads a mod's hooks.
 

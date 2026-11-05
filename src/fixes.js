@@ -1,5 +1,5 @@
 // Reads <project>/.steer/fixes.jsonl, the log written by inject
-// (https://github.com/sk82santhosh-cpu/Inject): one line per message the user
+// (https://github.com/Aryan-sk6/Inject): one line per message the user
 // injected while the agent was working.
 //
 // visualizar never writes to fixes.jsonl (inject appends to it while running).
